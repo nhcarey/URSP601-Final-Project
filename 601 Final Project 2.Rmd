@@ -1,0 +1,341 @@
+---
+title: "601 Final Group Project"
+author: "Tim, Noah, Caleb, Joseph"
+date: "2024-12-06"
+output: html_document
+---
+
+
+```{r load packages}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(leaflet)
+```
+
+#Set Working Directory
+```{r Create Path}
+#Load in SVI Data
+SVI <- read.csv("Maryland.csv")
+
+head(SVI)
+
+#Load LIHTC Census Tract Data
+BQT <- st_read(dsn = "Baltimore_City_Qualified_Census_Tracts.shp")
+```
+
+
+
+### 1. Handling Missing Values (if any)
+```{r missing data}
+#Check missing values for SVI Data
+colSums(is.na(SVI))
+
+#Check missing values for LIHTC Census Tract Data
+colSums(is.na(BQT))
+
+#Filter and view missing data
+na.AH <- BQT %>%
+  filter(if_any(everything(), is.na))
+
+#Filter and remove -999 value in EP_HBURD
+SVI <- SVI %>% filter(EP_HBURD != -999)
+```
+
+
+### 2. Transform and Filter Variables (if necessary)
+```{r transform and filter}
+
+#Histogram of percentage of persons (age 5+) who speak English “less than well”
+hist(SVI$EP_LIMENG)
+
+#Create column for square root of EP_LIMENG
+SVI <- SVI %>%
+      mutate(ROOT_EP_LIMENG = sqrt(EP_LIMENG))
+
+#Histogram of root of percentage percentage of persons (age 5+) who speak English “less than well”
+hist(SVI$ROOT_EP_LIMENG)
+
+
+#Histogram of percentage minority
+hist(SVI$EP_MINRTY)
+
+# Create categorical column for greater than 60% minority (median) or less than 60% minority
+SVI <- SVI %>%
+        mutate(MEDIAN_MINRTY = ifelse(EP_MINRTY >60, TRUE, FALSE))
+
+#Histogram of percentage minority by whether the tract has a minority population greater than the median
+hist(SVI$EP_MINRTY[SVI$MEDIAN_MINRTY == TRUE])
+
+hist(SVI$EP_MINRTY[SVI$MEDIAN_MINRTY == FALSE])
+
+#Histogram of number of tracts with a minority population greater than the median
+MINRTY_COUNT <- SVI %>%
+                  group_by(MEDIAN_MINRTY) %>%
+                  summarize(COUNT = n())
+
+ggplot(MINRTY_COUNT, aes(x = MEDIAN_MINRTY, y = COUNT)) +
+  geom_bar(stat = "identity")
+
+#Histogram of count minority
+hist(SVI$E_MINRTY)
+
+#Create column for log of E_MINRTY
+SVI <- SVI %>%
+     mutate(LOG_E_MINRTY = log(E_MINRTY))
+
+#Histogram of log of count minority
+hist(SVI$LOG_E_MINRTY)
+
+
+#Histogram of Housing Burdened Percentage
+hist(SVI$EP_HBURD)
+
+
+#Filter and select SVI data
+SVI_FILTER <- SVI %>%
+              #Filter for variables we are analyzing
+              select(FIPS, LOCATION, AREA_SQMI, EP_LIMENG, ROOT_EP_LIMENG,
+                     EP_MINRTY, MEDIAN_MINRTY, E_MINRTY, LOG_E_MINRTY, EP_HBURD)
+```
+
+## Step 4: Descriptive Statistics and Distribution Analysis
+
+Descriptive stats give you a sneak preview of your data’s “personality,” and visualizing distributions helps you spot patterns or surprises.
+
+### 1. Summary Statistics
+``` {r summary stats}
+SVI_LIM_MIN_GROUP_SUMMARY <- SVI_FILTER %>%
+  select(EP_LIMENG, ROOT_EP_LIMENG, EP_MINRTY, MEDIAN_MINRTY, E_MINRTY, LOG_E_MINRTY) %>%
+  summary()
+
+SVI_LIM_MIN_GROUP_SUMMARY
+```
+
+```{r minority distributions}
+#Distribution of Percentage Minority
+ggplot(SVI_FILTER, aes(EP_MINRTY)) +
+  geom_density(color = "darkgrey", fill = "grey") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(linetype = "solid")
+  ) +
+  scale_x_continuous(breaks = seq(0,100,10), limits = c(0,100)) +
+  labs(title = "Distribution of Perecentage Minority",
+       x = "Perecentage Minority",
+       y = "Density") +
+  geom_vline(aes(xintercept = mean(EP_MINRTY)), color = "blue", alpha = 0.7) +
+  geom_vline(aes(xintercept = median(EP_MINRTY)), color = "darkorange", alpha = 0.7) +
+  geom_text(aes(x=mean(EP_MINRTY), label="\nMean", y=0.012), colour="blue", angle=90) +
+  geom_text(aes(x=median(EP_MINRTY), label="Median\n", y=0.012), colour="darkorange", angle=90)
+
+#Plot number of tracts with majority minority populations
+ggplot(MINRTY_COUNT, aes(x = MEDIAN_MINRTY, y = COUNT)) +
+  geom_bar(stat = "identity", color = "steelblue", fill = "skyblue") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(linetype = "solid")
+  ) +
+  labs(title = "Count of Tracts with Percentage Minority Greater or Less Than Median Percentage (60%)",
+       x = "Does the Tract Have a Percentage Minority Greater than the Median Percentage (60%)?",
+       y = "Count")
+
+#Distribution of Count Minority (log)
+ggplot(SVI_FILTER, aes(LOG_E_MINRTY)) +
+  geom_density(color = "darkgrey", fill = "grey") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(linetype = "solid")
+  ) +
+  scale_x_continuous(breaks = seq(5,10,0.5), limits = c(5,10)) +
+  labs(title = "Distribution of Minority Population (log)",
+       x = "Count of Minorities (log)",
+       y = "Density") +
+  geom_vline(aes(xintercept = mean(LOG_E_MINRTY)), color = "blue", alpha = 0.7) +
+  geom_vline(aes(xintercept = median(LOG_E_MINRTY)), color = "darkorange", alpha = 0.7) +
+  geom_text(aes(x=mean(LOG_E_MINRTY), label="\nMean", y=0.2), colour="blue", angle=90) +
+  geom_text(aes(x=median(LOG_E_MINRTY), label="Median\n", y=0.2), colour="darkorange", angle=90)
+```
+
+
+
+### 3. Spatial Exploration with Maps
+
+```{r choropleth}
+#Percentage of persons (age 5+) who speak English “less than well” 
+#Showing english profiency on a map of baltimore
+EP_LIMENG_MAP <- ggplot() +
+  geom_point(data = SVI, aes(fill = ROOT_EP_LIMENG), linewidth = 0, alpha = 0.9) +
+  theme_void() +
+  scale_fill_viridis_c(option = "B",
+    name = "Perecentage of Housing\nCost-burdened Occupied\nHousing Units (root)",
+    ) +
+    labs(
+    title = "Cost-burdened Housing Units Across Baltimore.",
+  )
+
+print = EP_LIMENG_MAP
+
+#Percentage Minority
+#Same but for minorities
+MINRTY_MAP <- ggplot() +
+  geom_sf(data = SVI, aes(fill = EP_MINRTY), linewidth = 0, alpha = 0.9) +
+  theme_void() +
+  scale_fill_viridis_c(option = "B",
+    name = "Perecentage Minority",
+    ) +
+    labs(
+    title = "Minority Percentage Across Balitmore",
+  )
+
+
+#Same but for minority count
+MINRTY_C_MAP <- ggplot() +
+  geom_sf(data = SVI, aes(fill = E_MINRTY), linewidth = 0, alpha = 0.9) +
+  theme_void() +
+  scale_fill_viridis_c(option = "B",
+    name = "Minority Count",
+    ) +
+    labs(
+    title = "Minority Count Across Baltimore",
+  )
+
+
+#Same but for minority median
+MINRTY_MEDIAN_MAP <- ggplot() +
+  geom_sf(data = SVI, aes(fill = MEDIAN_MINRTY), color = "grey", linewidth = 0.05, alpha = 0.9) +
+  theme_void() +
+  scale_fill_viridis_d(option = "D",
+    name = "Perecentage Minority Greater\nThan Median Percentage (60%)",
+    ) +
+    labs(
+    title = "Minority Population Across Balitmore.",
+    subtitle = "Perecentage Minority by Median Percentage (60%)"
+  )
+
+
+```
+
+
+## Step 5: Hypothesis Testing
+
+### 1. T-tests for Continuous Data
+```{r T-test hypothesis}
+# T-test 1
+# Create a categorical variable from MEDIAN_MINRTY (High/Low Minority)
+median_minrty <- median(SVI$MEDIAN_MINRTY, na.rm = TRUE)
+
+# Create a new column 'MINRTY_GROUP' based on whether MEDIAN_MINRTY is greater or less than the median
+SVI <- SVI %>%
+  mutate(MINRTY_GROUP = ifelse(MEDIAN_MINRTY >= median_minrty, "High Minority", "Low Minority"))
+
+# Perform t-test comparing EP_LIMENG for "High Minority" vs "Low Minority"
+t_test_minrty <- t.test(EP_LIMENG ~ MINRTY_GROUP, data = SVI)
+
+# Print the t-test result for High vs Low Minority
+print("T-test for High vs Low Minority:")
+print(t_test_minrty)
+```
+
+
+### 3. One-Way ANOVA
+```{r ANOVA One-Way}
+# Possible: Housing Burden by zoning types
+# Zoning types and EP Minority  
+# Zoning types and EP English Prof   <- explore these in summary statistics/explore distributions too
+```
+
+## Step 6: Correlation Analysis
+
+# 
+```{r}
+# CORRELATION MATRIX OF EP MINORITY, EP LIMENG, AND EP HBURD
+cor_matrix <- SVI_FILTER %>%
+              select(EP_MINRTY, ROOT_EP_LIMENG, EP_HBURD) %>%  
+              cor(use = "complete.obs")  
+print(cor_matrix)
+
+
+# SCATTERPLOT CORRELATION BETWEEN EP LIMENG AND EP MINRTY
+#Correlation Matrix between Language Proficiency and Minority
+cor_1 <- SVI_FILTER %>%
+         select(ROOT_EP_LIMENG, EP_MINRTY)
+  
+cor_matrix_1 <- cor(cor_1[, c("ROOT_EP_LIMENG", "EP_MINRTY")])
+cor_matrix_1
+
+#Correlation graph between Language Proficiency and Minority
+ggplot(cor_1, aes(EP_MINRTY, ROOT_EP_LIMENG)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "blue", se = FALSE)
+
+
+# SCATTERPLOT CORRELATION BETWEEN EP MINORITY AND EP HBURD
+cor_2 <- SVI_FILTER %>%
+         select(EP_MINRTY, EP_HBURD)
+  
+cor_matrix_2 <- cor(cor_2[, c("EP_MINRTY", "EP_HBURD")])
+cor_matrix_2
+
+#Correlation graph between Language Proficiency and Minority
+ggplot(cor_2, aes(EP_MINRTY, EP_HBURD)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "blue", se = FALSE)
+
+
+# SCATTERPLOT CORRELATION BETWEEN EP LIMENG AND EP HBURD
+cor_3 <- SVI_FILTER %>%
+         select(ROOT_EP_LIMENG, EP_HBURD)
+  
+cor_matrix_3 <- cor(cor_3[, c("ROOT_EP_LIMENG", "EP_HBURD")])
+cor_matrix_3
+
+#Correlation graph between Language Proficiency and Minority
+ggplot(cor_3, aes(ROOT_EP_LIMENG, EP_HBURD)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "blue", se = FALSE)
+```
+
+
+## Multilinear Regression 
+```{r}
+# MULTILINEAR REGRESSION BETWEEN EP MINORITY, EP LIMENG, AND EP HBURD
+# Fit the multilinear regression model
+model <- lm(EP_HBURD ~ EP_MINRTY * ROOT_EP_LIMENG, data = SVI_FILTER)
+summary(model) # Check model summary
+
+# Visualize Both Variables vs. EP_HBURD in 1 graph (Not related to the rest of this section)
+ggplot(SVI_FILTER, aes(x = EP_MINRTY, y = EP_HBURD, color = ROOT_EP_LIMENG)) +
+  geom_point() +
+  labs(
+    title = "EP_MINRTY and ROOT_EP_LIMENG vs. EP_HBURD",
+    x = "EP_MINRTY",
+    y = "EP_HBURD"
+  ) +
+  stat_smooth(method="lm",se=FALSE)
+
+# Add Predicted Values
+SVI_FILTER$Predicted <- predict(model, newdata = SVI_FILTER)
+
+# Visualize the Multiple Linear Regression
+ggplot(SVI_FILTER, aes(x = EP_HBURD, y = Predicted)) +
+  geom_point(color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Observed vs. Predicted Housing Burden % from Minority % and Lim Eng Prof. %",
+    x = "Observed EP_HBURD",
+    y = "Predicted EP_HbURD"
+  ) +
+  theme_minimal()
+
+# Comprehensive diagnostic plots
+par(mfrow = c(2, 2))
+plot(model)
+```
+
